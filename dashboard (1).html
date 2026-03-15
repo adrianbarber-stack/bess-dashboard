@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BESS Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:wght@300;400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:         #0d0f12;
+    --panel:      #13161b;
+    --border:     #1e242d;
+    --border-hi:  #2e3847;
+    --text:       #c8d0dc;
+    --text-dim:   #556070;
+    --text-hi:    #eef2f8;
+    --mono:       'Share Tech Mono', monospace;
+    --sans:       'Barlow', sans-serif;
+    --green:      #39e98b;
+    --green-dim:  #1a4a35;
+    --amber:      #f5a623;
+    --amber-dim:  #4a3310;
+    --red:        #f04040;
+    --red-dim:    #4a1515;
+    --blue:       #4ab0ff;
+    --blue-dim:   #153050;
+    --gauge-track: #1a1f28;
+    --radius: 6px;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-weight: 400;
+    min-height: 100vh;
+    padding: 24px;
+    background-image:
+      linear-gradient(rgba(255,255,255,.015) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.015) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  /* ── Header ── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 28px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .header-left h1 {
+    font-family: var(--mono);
+    font-size: 18px;
+    letter-spacing: 3px;
+    color: var(--text-hi);
+    text-transform: uppercase;
+  }
+
+  .header-left p {
+    font-size: 12px;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+    margin-top: 4px;
+    text-transform: uppercase;
+  }
+
+  /* ── Status pill — now shows LIVE / DELAYED / STALE + data age ── */
+  .status-pill {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    transition: all .3s;
+  }
+  .status-pill.live    { background: var(--green-dim);  color: var(--green); border: 1px solid var(--green); }
+  .status-pill.delayed { background: var(--amber-dim);  color: var(--amber); border: 1px solid var(--amber); }
+  .status-pill.stale   { background: var(--red-dim);    color: var(--red);   border: 1px solid var(--red); }
+  .status-pill.error   { background: var(--red-dim);    color: var(--red);   border: 1px solid var(--red); }
+  .status-pill.loading { background: var(--blue-dim);   color: var(--blue);  border: 1px solid var(--blue); }
+
+  .status-age {
+    font-size: 10px;
+    opacity: 0.75;
+    margin-left: 4px;
+  }
+
+  .pulse {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: currentColor;
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: .4; transform: scale(.7); }
+  }
+
+  /* ── Stale value overlay — dims the card values ── */
+  .card.stale-data .big-value,
+  .card.stale-data .gauge-value {
+    opacity: 0.45;
+  }
+  .card.stale-data::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: var(--radius);
+    background: repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 8px,
+      rgba(0,0,0,0.08) 8px,
+      rgba(0,0,0,0.08) 9px
+    );
+    pointer-events: none;
+  }
+
+  /* ── Grid ── */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+
+  /* ── Card ── */
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color .2s;
+  }
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--accent, var(--border-hi));
+    transition: background .3s;
+  }
+  .card:hover { border-color: var(--border-hi); }
+
+  .card-label {
+    font-size: 10px;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+    font-family: var(--mono);
+  }
+
+  .card-sublabel {
+    font-size: 10px;
+    color: var(--text-dim);
+    font-family: var(--mono);
+    margin-bottom: 14px;
+    opacity: 0.7;
+  }
+
+  /* ── SoC gauge ── */
+  .soc-card { --accent: var(--green); }
+
+  .gauge-wrap {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+
+  .gauge-ring {
+    position: relative;
+    width: 110px;
+    height: 110px;
+    flex-shrink: 0;
+  }
+
+  .gauge-ring svg {
+    width: 110px;
+    height: 110px;
+    transform: rotate(-90deg);
+  }
+
+  .gauge-track { fill: none; stroke: var(--gauge-track); stroke-width: 8; }
+
+  .gauge-fill {
+    fill: none;
+    stroke: var(--green);
+    stroke-width: 8;
+    stroke-linecap: round;
+    stroke-dasharray: 283;
+    stroke-dashoffset: 283;
+    transition: stroke-dashoffset 1s ease, stroke .5s ease;
+    filter: drop-shadow(0 0 6px var(--green));
+  }
+
+  .gauge-center {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .gauge-value {
+    font-family: var(--mono);
+    font-size: 26px;
+    color: var(--text-hi);
+    line-height: 1;
+    transition: opacity .3s;
+  }
+
+  .gauge-unit { font-size: 11px; color: var(--text-dim); margin-top: 2px; letter-spacing: 1px; }
+
+  .soc-details { flex: 1; }
+
+  .soc-bar-wrap { margin-bottom: 12px; }
+
+  .soc-bar-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+    font-family: var(--mono);
+  }
+
+  .soc-bar {
+    height: 6px;
+    background: var(--gauge-track);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .soc-bar-fill {
+    height: 100%;
+    background: var(--green);
+    border-radius: 3px;
+    transition: width 1s ease;
+    box-shadow: 0 0 8px var(--green);
+  }
+
+  /* ── Power / Load cards ── */
+  .power-in-card  { --accent: var(--blue); }
+  .power-out-card { --accent: var(--amber); }
+
+  .big-value {
+    font-family: var(--mono);
+    font-size: 42px;
+    font-weight: 300;
+    color: var(--text-hi);
+    line-height: 1;
+    letter-spacing: -1px;
+    transition: opacity .3s;
+  }
+
+  .big-unit {
+    font-family: var(--mono);
+    font-size: 16px;
+    color: var(--text-dim);
+    margin-left: 4px;
+  }
+
+  .card-note {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 8px;
+  }
+
+  /* ── Sparkline with context ── */
+  .sparkline-wrap { margin-top: 14px; }
+
+  .sparkline-meta {
+    display: flex;
+    justify-content: space-between;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+    opacity: 0.7;
+  }
+
+  .sparkline {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 32px;
+  }
+
+  .spark-col {
+    flex: 1;
+    background: var(--accent, var(--border-hi));
+    border-radius: 2px 2px 0 0;
+    opacity: .5;
+    min-width: 4px;
+    transition: height .3s ease;
+  }
+  .spark-col:last-child { opacity: 1; }
+
+  /* ── Status / Fault card ── */
+  .status-card { --accent: var(--green); }
+
+  .fault-indicator {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--gauge-track);
+    margin-bottom: 10px;
+    transition: all .3s;
+  }
+
+  .fault-indicator.ok    { border-color: var(--green); background: var(--green-dim); }
+  .fault-indicator.warn  { border-color: var(--amber); background: var(--amber-dim); }
+  .fault-indicator.fault { border-color: var(--red);   background: var(--red-dim); }
+
+  .fault-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--text-dim);
+    flex-shrink: 0;
+  }
+  .fault-indicator.ok    .fault-dot { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .fault-indicator.warn  .fault-dot { background: var(--amber); box-shadow: 0 0 8px var(--amber); animation: pulse 1.5s infinite; }
+  .fault-indicator.fault .fault-dot { background: var(--red);   box-shadow: 0 0 8px var(--red);   animation: pulse 1s infinite; }
+
+  .fault-label {
+    font-family: var(--mono);
+    font-size: 13px;
+    letter-spacing: 1px;
+    color: var(--text-hi);
+  }
+
+  /* ── Stale data banner ── */
+  .stale-banner {
+    display: none;
+    border-radius: var(--radius);
+    margin-bottom: 16px;
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 1px;
+    padding: 10px 16px;
+    text-transform: uppercase;
+  }
+  .stale-banner.delayed { display: block; background: var(--amber-dim); border: 1px solid var(--amber); color: var(--amber); }
+  .stale-banner.stale   { display: block; background: var(--red-dim);   border: 1px solid var(--red);   color: var(--red); }
+
+  /* ── Meta row ── */
+  .meta-row {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .meta-card {
+    flex: 1;
+    min-width: 200px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .meta-icon { font-size: 20px; opacity: .6; }
+
+  .meta-text .label {
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    font-family: var(--mono);
+  }
+
+  .meta-text .value {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--text-hi);
+    margin-top: 3px;
+  }
+
+  @media (max-width: 600px) {
+    body { padding: 12px; }
+    .big-value { font-size: 32px; }
+    header { flex-direction: column; align-items: flex-start; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <h1>BESS Monitor</h1>
+    <p>Portable Battery Energy Storage System</p>
+  </div>
+  <div id="statusPill" class="status-pill loading">
+    <span class="pulse"></span>
+    <span id="statusText">Connecting…</span>
+    <span class="status-age" id="statusAge"></span>
+  </div>
+</header>
+
+<div id="staleBanner" class="stale-banner"></div>
+
+<div class="grid">
+
+  <!-- SoC Card -->
+  <div class="card soc-card" id="cardSoc">
+    <div class="card-label">State of Charge</div>
+    <div class="card-sublabel">From HusshPod telemetry</div>
+    <div class="gauge-wrap">
+      <div class="gauge-ring">
+        <svg viewBox="0 0 110 110">
+          <circle class="gauge-track" cx="55" cy="55" r="45"/>
+          <circle class="gauge-fill" id="gaugeFill" cx="55" cy="55" r="45"/>
+        </svg>
+        <div class="gauge-center">
+          <span class="gauge-value" id="socValue">--</span>
+          <span class="gauge-unit">%</span>
+        </div>
+      </div>
+      <div class="soc-details">
+        <div class="soc-bar-wrap">
+          <div class="soc-bar-label">
+            <span>0%</span><span>50%</span><span>100%</span>
+          </div>
+          <div class="soc-bar">
+            <div class="soc-bar-fill" id="socBarFill" style="width:0%"></div>
+          </div>
+        </div>
+        <div class="card-note" id="socNote">Awaiting data…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Battery Power Card -->
+  <div class="card power-in-card" id="cardBattKw">
+    <div class="card-label">Battery Power — Instantaneous</div>
+    <div class="card-sublabel">+ kW = discharge to load &nbsp;/&nbsp; − kW = charging</div>
+    <div>
+      <span class="big-value" id="powerIn">--</span>
+      <span class="big-unit">kW</span>
+    </div>
+    <div class="card-note" id="powerInNote">Awaiting data…</div>
+    <div class="sparkline-wrap">
+      <div class="sparkline-meta">
+        <span id="sparkInWindow">—</span>
+        <span id="sparkInRange">—</span>
+      </div>
+      <div class="sparkline" id="sparkIn"></div>
+    </div>
+  </div>
+
+  <!-- Pod Output Card -->
+  <div class="card power-out-card" id="cardLoad">
+    <div class="card-label">Pod Output (kW)</div>
+    <div class="card-sublabel">From HusshPod telemetry · total all phases</div>
+    <div>
+      <span class="big-value" id="powerOut">--</span>
+      <span class="big-unit">kW</span>
+    </div>
+    <div class="card-note" id="powerOutNote">Awaiting data…</div>
+    <div class="sparkline-wrap">
+      <div class="sparkline-meta">
+        <span id="sparkOutWindow">—</span>
+        <span id="sparkOutRange">—</span>
+      </div>
+      <div class="sparkline" id="sparkOut"></div>
+    </div>
+  </div>
+
+  <!-- Battery Status Card -->
+  <div class="card status-card" id="cardStatus">
+    <div class="card-label">Battery Status</div>
+    <div class="card-sublabel">Shutdown &amp; alarm monitoring</div>
+    <div class="fault-indicator" id="faultIndicator">
+      <span class="fault-dot"></span>
+      <span class="fault-label" id="faultLabel">Awaiting data…</span>
+    </div>
+    <div class="card-note" id="faultNote"></div>
+  </div>
+
+</div>
+
+<!-- Meta row -->
+<div class="meta-row">
+  <div class="meta-card">
+    <div class="meta-icon">🕐</div>
+    <div class="meta-text">
+      <div class="label">Last Device Update</div>
+      <div class="value" id="deviceTs">--</div>
+    </div>
+  </div>
+  <div class="meta-card">
+    <div class="meta-icon">🔄</div>
+    <div class="meta-text">
+      <div class="label">Dashboard Refreshed</div>
+      <div class="value" id="dashTs">--</div>
+    </div>
+  </div>
+  <div class="meta-card">
+    <div class="meta-icon">📡</div>
+    <div class="meta-text">
+      <div class="label">Data Feed</div>
+      <div class="value" id="feedStatus">--</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────
+//  Config — API key is NEVER here; all data comes from the
+//  Cloudflare Worker which holds the key server-side.
+// ─────────────────────────────────────────────────────────
+const WORKER_URL     = "https://bess-telemetry-worker.adrian-barber.workers.dev/data";
+const POLL_MS        = 30_000;
+
+// Freshness thresholds (seconds)
+const THRESHOLD_LIVE    = 30;
+const THRESHOLD_DELAYED = 180;
+
+// ─────────────────────────────────────────────────────────
+//  State — last known good values, never overwritten with nulls
+// ─────────────────────────────────────────────────────────
+const lastGood = {
+  soc: null, battery_kw: null, total_load: null,
+  error_number: null, active_faults: [], operating_mode_label: null,
+  ts: null, everReceived: false,
+};
+
+// ─────────────────────────────────────────────────────────
+//  DOM refs
+// ─────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const gaugeFill   = $("gaugeFill");
+const socValue    = $("socValue");
+const socBarFill  = $("socBarFill");
+const socNote     = $("socNote");
+const powerIn     = $("powerIn");
+const powerOut    = $("powerOut");
+const sparkIn     = $("sparkIn");
+const sparkOut    = $("sparkOut");
+const faultIndicator = $("faultIndicator");
+const faultLabel  = $("faultLabel");
+const faultNote   = $("faultNote");
+const deviceTs    = $("deviceTs");
+const dashTs      = $("dashTs");
+const feedStatus  = $("feedStatus");
+const staleBanner = $("staleBanner");
+const statusPill  = $("statusPill");
+const statusText  = $("statusText");
+const statusAge   = $("statusAge");
+
+// ─────────────────────────────────────────────────────────
+//  Helpers
+// ─────────────────────────────────────────────────────────
+function fmt(val, decimals = 1) {
+  if (val === null || val === undefined) return "--";
+  return Number(val).toFixed(decimals);
+}
+
+function fmtTs(iso) {
+  if (!iso) return "--";
+  try {
+    return new Date(iso).toLocaleString("en-GB", {
+      day:"2-digit", month:"short",
+      hour:"2-digit", minute:"2-digit", second:"2-digit"
+    });
+  } catch { return iso; }
+}
+
+function dataAgeSec(isoTs) {
+  if (!isoTs) return Infinity;
+  return (Date.now() - new Date(isoTs).getTime()) / 1000;
+}
+
+function fmtAge(sec) {
+  if (!isFinite(sec)) return "unknown age";
+  if (sec < 60) return `${Math.round(sec)}s ago`;
+  const m = Math.floor(sec / 60), s = Math.round(sec % 60);
+  return `${m}m ${s}s ago`;
+}
+
+// ─────────────────────────────────────────────────────────
+//  Freshness state machine
+// ─────────────────────────────────────────────────────────
+function applyFreshness(ageSec) {
+  const allCards = ["cardSoc","cardBattKw","cardLoad","cardStatus"]
+    .map(id => $(id)).filter(Boolean);
+
+  if (ageSec <= THRESHOLD_LIVE) {
+    statusPill.className = "status-pill live";
+    statusText.textContent = "LIVE";
+    statusAge.textContent = `· Data age: ${Math.round(ageSec)}s`;
+    staleBanner.className = "stale-banner";
+    staleBanner.textContent = "";
+    allCards.forEach(c => c.classList.remove("stale-data"));
+
+  } else if (ageSec <= THRESHOLD_DELAYED) {
+    statusPill.className = "status-pill delayed";
+    statusText.textContent = "DELAYED";
+    statusAge.textContent = `· Data age: ${fmtAge(ageSec)}`;
+    staleBanner.className = "stale-banner delayed";
+    staleBanner.textContent = `⚠ Telemetry delayed — showing last known values (${fmtAge(ageSec)})`;
+    allCards.forEach(c => c.classList.add("stale-data"));
+
+  } else {
+    statusPill.className = "status-pill stale";
+    statusText.textContent = "STALE";
+    statusAge.textContent = `· No update for ${fmtAge(ageSec)}`;
+    staleBanner.className = "stale-banner stale";
+    staleBanner.textContent = `⛔ Data stale — no update for ${fmtAge(ageSec)} — values may not reflect current state`;
+    allCards.forEach(c => c.classList.add("stale-data"));
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+//  SoC gauge
+// ─────────────────────────────────────────────────────────
+function setSoC(pct) {
+  const clamped = Math.max(0, Math.min(100, pct ?? 0));
+  gaugeFill.style.strokeDashoffset = 283 - (283 * clamped / 100);
+
+  let colour = "var(--green)";
+  if (clamped < 20) colour = "var(--red)";
+  else if (clamped < 40) colour = "var(--amber)";
+  gaugeFill.style.stroke = colour;
+  gaugeFill.style.filter = `drop-shadow(0 0 6px ${colour})`;
+  socValue.textContent   = Math.round(clamped);
+  socBarFill.style.width = `${clamped}%`;
+  socBarFill.style.background = colour;
+  socBarFill.style.boxShadow  = `0 0 8px ${colour}`;
+
+  if      (clamped >= 80) socNote.textContent = "High charge";
+  else if (clamped >= 40) socNote.textContent = "Normal operating range";
+  else if (clamped >= 20) socNote.textContent = "Low — consider charging";
+  else                    socNote.textContent = "⚠ Critical — charge immediately";
+}
+
+// ─────────────────────────────────────────────────────────
+//  Sparkline with time window + min/max context
+// ─────────────────────────────────────────────────────────
+function renderSparkline(barEl, metaWindow, metaRange, history, key, accentVar, unit) {
+  if (!history || history.length < 2) {
+    barEl.innerHTML = "";
+    metaWindow.textContent = "—";
+    metaRange.textContent  = "—";
+    return;
+  }
+
+  const vals = history.map(h => {
+    const v = parseFloat(h[key]);
+    return isFinite(v) ? v : null;
+  }).filter(v => v !== null);
+
+  if (vals.length === 0) { barEl.innerHTML = ""; return; }
+
+  const minV  = Math.min(...vals);
+  const maxV  = Math.max(...vals);
+  const range = maxV - minV || 0.01;
+
+  // Time window from first to last timestamp
+  const t0 = new Date(history[0].ts);
+  const t1 = new Date(history[history.length - 1].ts);
+  const spanMin = Math.round((t1 - t0) / 60000);
+  metaWindow.textContent = `Last ${spanMin} min`;
+  metaRange.textContent  = `min ${fmt(minV)} / max ${fmt(maxV)} ${unit}`;
+
+  barEl.innerHTML = history.map(h => {
+    const v = parseFloat(h[key]);
+    const pct = isFinite(v) ? Math.max(4, Math.round(((v - minV) / range) * 100)) : 4;
+    return `<div class="spark-col" style="height:${pct}%; background:${accentVar}"></div>`;
+  }).join("");
+}
+
+// ─────────────────────────────────────────────────────────
+//  Fault rendering
+// ─────────────────────────────────────────────────────────
+function renderFault(faults, errNum, modeLabel) {
+  faultIndicator.className = "fault-indicator";
+  if (faults && faults.length > 0) {
+    faultIndicator.classList.add("fault");
+    faultLabel.textContent = "SHUTDOWN: " + faults[0];
+    faultNote.textContent  = faults.length > 1 ? `+${faults.length - 1} more fault(s)` : (errNum ? `Error code: ${errNum}` : "Check system immediately");
+  } else if (errNum && errNum !== 0) {
+    faultIndicator.classList.add("warn");
+    faultLabel.textContent = `Error Code: ${errNum}`;
+    faultNote.textContent  = "Non-critical fault — check system log";
+  } else {
+    faultIndicator.classList.add("ok");
+    faultLabel.textContent = "Normal Operation";
+    faultNote.textContent  = modeLabel ? `Mode: ${modeLabel}` : "No alarms or shutdowns active";
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+//  Main fetch + render
+// ─────────────────────────────────────────────────────────
+async function fetchAndRender() {
+  dashTs.textContent = fmtTs(new Date().toISOString());
+
+  try {
+    const res = await fetch(WORKER_URL);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    if (json.error) throw new Error(json.error);
+
+    const d       = json.latest;
+    const history = json.history || [];
+
+    // Update last-known-good store only with non-null values
+    if (d.soc           !== null && d.soc           !== undefined) lastGood.soc           = d.soc;
+    if (d.battery_kw    !== null && d.battery_kw    !== undefined) lastGood.battery_kw    = d.battery_kw;
+    if (d.total_load    !== null && d.total_load    !== undefined) lastGood.total_load    = d.total_load;
+    if (d.error_number  !== null && d.error_number  !== undefined) lastGood.error_number  = d.error_number;
+    if (d.active_faults && d.active_faults.length >= 0)           lastGood.active_faults = d.active_faults;
+    if (d.operating_mode_label)                                    lastGood.operating_mode_label = d.operating_mode_label;
+    if (d.ts)                                                      lastGood.ts            = d.ts;
+    lastGood.everReceived = true;
+
+    // Determine data age from device timestamp
+    const ageSec = dataAgeSec(d.ts);
+    applyFreshness(d.fetch_ok ? ageSec : Infinity);
+
+    // ── Render values (always from lastGood — never shows uninitialised zeros) ──
+    if (!lastGood.everReceived) {
+      // First load, no data yet
+      socValue.textContent  = "No data";
+      powerIn.textContent   = "No data";
+      powerOut.textContent  = "No data";
+      return;
+    }
+
+    // SoC
+    if (lastGood.soc !== null) setSoC(lastGood.soc);
+
+    // Battery kW
+    const bkw = lastGood.battery_kw;
+    if (bkw !== null) {
+      powerIn.textContent = fmt(bkw);
+      $("cardBattKw").style.setProperty("--accent",
+        bkw > 0 ? "var(--green)" : bkw < 0 ? "var(--amber)" : "var(--blue)");
+      $("powerInNote").textContent =
+        bkw > 0 ? "▲ Discharging to load" : bkw < 0 ? "▼ Charging from generator/solar" : "— Standby";
+    } else {
+      powerIn.textContent = "No data";
+    }
+
+    // Pod output / load
+    if (lastGood.total_load !== null) {
+      powerOut.textContent = fmt(lastGood.total_load);
+      $("powerOutNote").textContent = lastGood.operating_mode_label
+        ? `Mode: ${lastGood.operating_mode_label}` : "—";
+    } else {
+      powerOut.textContent = "No data";
+    }
+
+    // Sparklines
+    renderSparkline(sparkIn,  $("sparkInWindow"),  $("sparkInRange"),  history, "battery_kw", "var(--blue)",  "kW");
+    renderSparkline(sparkOut, $("sparkOutWindow"), $("sparkOutRange"), history, "total_load",  "var(--amber)", "kW");
+
+    // Fault / status
+    renderFault(lastGood.active_faults, lastGood.error_number, lastGood.operating_mode_label);
+
+    // Timestamps
+    deviceTs.textContent = fmtTs(lastGood.ts);
+    feedStatus.textContent = d.fetch_ok ? "Navixy EU — Connected" : `Feed error: ${d.error || "unknown"}`;
+
+  } catch (err) {
+    console.error("Fetch error:", err);
+    statusPill.className = "status-pill error";
+    statusText.textContent = "ERROR";
+    statusAge.textContent = "";
+    feedStatus.textContent = err.message;
+
+    if (!lastGood.everReceived) {
+      staleBanner.className = "stale-banner stale";
+      staleBanner.textContent = "⛔ Cannot reach data feed — " + err.message;
+    } else {
+      // Keep showing last known values, apply stale styling
+      const ageSec = dataAgeSec(lastGood.ts);
+      applyFreshness(ageSec);
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+//  Live age counter — updates every second without re-fetching
+// ─────────────────────────────────────────────────────────
+setInterval(() => {
+  if (!lastGood.ts) return;
+  const ageSec = dataAgeSec(lastGood.ts);
+  applyFreshness(ageSec);
+}, 1000);
+
+// ─────────────────────────────────────────────────────────
+//  Boot
+// ─────────────────────────────────────────────────────────
+fetchAndRender();
+setInterval(fetchAndRender, POLL_MS);
+</script>
+</body>
+</html>
